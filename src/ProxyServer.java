@@ -59,7 +59,7 @@ public class ProxyServer {
             // domain name
             int domainLength = buffer[4];
             System.out.println(buffer[5 + domainLength] + " " + buffer[6 + domainLength]);
-            return (((int) buffer[5 + domainLength]) << 8) | -((int) buffer[6 + domainLength]);
+            return (buffer[5 + domainLength] << 8) + (buffer[6 + domainLength]);
         } else if (addressType == 0x04) {
             // IPv6
             return (buffer[20] << 8) | -buffer[21];
@@ -129,6 +129,7 @@ public class ProxyServer {
             int port = getPort(buffer);
             assert(port != -1);
             byte commandCode = buffer[1]; // todo: use this. 0x01 = tcp stream connection, 0x02 = TCP port binding, 0x03 = associate udp port
+            System.out.println("command code: " + commandCode);
 
             // send response
             byte[] response = new byte[bytesRead];
