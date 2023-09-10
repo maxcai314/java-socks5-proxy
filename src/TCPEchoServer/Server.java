@@ -6,22 +6,25 @@ import java.net.*;
 
 public class Server {
 
-    public static void main(String[] args) throws IOException {
-        ServerSocket serverSocket = new ServerSocket(6666);
-        Socket socket = serverSocket.accept();
+    public static void main(String[] args) {
+        try (ServerSocket serverSocket = new ServerSocket(6666)) {
+            Socket socket = serverSocket.accept();
 
-        PrintWriter socketOut = new PrintWriter(socket.getOutputStream(), true);
-        BufferedReader socketIn = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            PrintWriter socketOut = new PrintWriter(socket.getOutputStream(), true);
+            BufferedReader socketIn = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
-        String input;
-        while ((input = socketIn.readLine()) != null) {
-            if (input.equals("quit")) {
-                socketOut.println("stopping server");
-                System.out.println("stopping server");
-                break;
+            String input;
+            while ((input = socketIn.readLine()) != null) {
+                if (input.equals("quit")) {
+                    socketOut.println("stopping server");
+                    System.out.println("stopping server");
+                    break;
+                }
+                socketOut.println(input); // echo back to client
+                System.out.println(input); // print to own console
             }
-            socketOut.println(input); // echo back to client
-            System.out.println(input); // print to own console
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
     }
 }
