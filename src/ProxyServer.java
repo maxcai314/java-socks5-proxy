@@ -54,7 +54,7 @@ public class ProxyServer {
         byte addressType = buffer[3];
         if (addressType == 0x01) {
             // IPv4
-            return (buffer[9] << 8) | buffer[8];
+            return (buffer[8] << 8) | -buffer[9];
         } else if (addressType == 0x03) {
             // domain name
             int domainLength = buffer[4];
@@ -62,7 +62,7 @@ public class ProxyServer {
             return (((int) buffer[5 + domainLength]) << 8) | -((int) buffer[6 + domainLength]);
         } else if (addressType == 0x04) {
             // IPv6
-            return (buffer[21] << 8) | buffer[20];
+            return (buffer[20] << 8) | -buffer[21];
         }
         return -1;
     }
@@ -128,6 +128,7 @@ public class ProxyServer {
             // port number in network byte order
             int port = getPort(buffer);
             assert(port != -1);
+            byte commandCode = buffer[1]; // todo: use this. 0x01 = tcp stream connection, 0x02 = TCP port binding, 0x03 = associate udp port
 
             // send response
             byte[] response = new byte[bytesRead];
@@ -139,22 +140,23 @@ public class ProxyServer {
 
             // do the proxying
 
-            while (socket.getInputStream().available() != 0) {
-                bytesRead = socket.getInputStream().read(buffer);
+            while ((bytesRead = socket.getInputStream().read(buffer)) != -1) {
                 System.out.println("read " + bytesRead + " bytes");
                 System.out.println(new String(buffer, 0, bytesRead));
                 Socket targetSocket = new Socket(address, port);
-                targetSocket.getOutputStream().write(buffer, 0, bytesRead);
-                targetSocket.getOutputStream().flush();
+                System.out.println("connected to target");
+                targetSocket.getOutputStream().write(buffer);
+                System.out.println("wrote " + bytesRead + " bytes");
+//                targetSocket.getOutputStream().flush();
                 int targetBytesRead;
-                while (targetSocket.getInputStream().available() != 0) {
-                    targetBytesRead = targetSocket.getInputStream().read(buffer);
+                while ((targetBytesRead = targetSocket.getInputStream().read(buffer)) != -1) {
                     System.out.println("read " + targetBytesRead + " bytes");
                     System.out.println(new String(buffer, 0, targetBytesRead));
                     socket.getOutputStream().write(buffer, 0, targetBytesRead);
                     socket.getOutputStream().flush();
                 }
                 targetSocket.close();
+                System.out.println("closed target socket");
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
