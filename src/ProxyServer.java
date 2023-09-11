@@ -200,11 +200,14 @@ public class ProxyServer implements Closeable{
 		}
 	}
 
-	public void acceptSocketConnection() throws IOException, InterruptedException {
+	public SocketChannel accept() throws IOException {
+		return serverSocketChannel.accept();
+	}
+
+	public void handleSocketConnection(SocketChannel socketChannelClient) throws IOException, InterruptedException {
 		try (
-			SocketChannel socketChannelClient = serverSocketChannel.accept();
 			SocketChannel socketChannelServer = SocketChannel.open(socks5Negotiation(socketChannelClient));
-			PersistentTaskExecutor<IOException> executor = new PersistentTaskExecutor<>("forwardPackets", a -> (IOException) a, logger);
+			PersistentTaskExecutor<IOException> executor = new PersistentTaskExecutor<>("forwardPackets", a -> new IOException(a), logger);
 		) {
 			logger.log(INFO , "opening server connection with {0}", socketChannelServer.getRemoteAddress());
 
@@ -215,6 +218,8 @@ public class ProxyServer implements Closeable{
 			executor.throwIfFailed();
 
 			logger.log(INFO, "closing server connection with {0}", socketChannelServer.getRemoteAddress());
+		} finally {
+			socketChannelClient.close();
 		}
 	}
 }

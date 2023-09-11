@@ -1,4 +1,5 @@
 import java.io.IOException;
+import java.nio.channels.SocketChannel;
 
 public class RepeatedlyRunProxy {
     private static final System.Logger logger = System.getLogger(RepeatedlyRunProxy.class.getName());
@@ -8,11 +9,10 @@ public class RepeatedlyRunProxy {
             ProxyServer proxyServer = new ProxyServer();
             IndependentTaskExecutor<Exception> executor = new IndependentTaskExecutor<>("Proxy Server", logger);
         ) {
-            for (int i = 0; i < 100; i++) {
-                // todo: add a count of open connections, and use while loop to always fill
-                executor.submit("SOCKS5 Session", proxyServer::acceptSocketConnection);
+            while (!Thread.interrupted()) {
+                SocketChannel socketChannelClient = proxyServer.accept();
+                executor.submit("SOCKS5 Proxy Session", () -> proxyServer.handleConnection(socketChannel));
             }
-            executor.join();
         }
     }
 }
