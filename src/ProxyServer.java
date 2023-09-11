@@ -31,7 +31,6 @@ public class ProxyServer {
 
 
 			// client greeting
-            System.out.println("client greeting");
 			inputBuffer.clear();
             socketChannel.read(inputBuffer);
             inputBuffer.flip();
@@ -39,9 +38,6 @@ public class ProxyServer {
 			byte numAuthMethods = inputBuffer.get();
 			byte[] authMethods = new byte[numAuthMethods];
 			inputBuffer.get(authMethods);
-            System.out.println("num auth methods: " + numAuthMethods);
-            System.out.println("auth methods: " + Arrays.toString(authMethods));
-            System.out.println("socks version: " + socksVersion);
 
 			assert(socksVersion == SOCKS_VERSION);
 
@@ -75,21 +71,23 @@ public class ProxyServer {
             byte reserved = inputBuffer.get();
             byte addressType = inputBuffer.get();
 
+            System.out.printf("socksVersion: %d, command: %d, reserved: %d, addressType: %d\n", socksVersion, command, reserved, addressType);
+
             assert(socksVersion == SOCKS_VERSION);
             assert(reserved == RESERVED_BYTE);
 
             InetAddress requestedAddress;
-            if (command == 0x01) { // todo: maybe make these enums or static variables
+            if (addressType == 0x01) { // todo: maybe make these enums or static variables
                 // IPv4
                 byte[] addressBytes = new byte[4];
                 inputBuffer.get(addressBytes);
                 requestedAddress = InetAddress.getByAddress(addressBytes);
-            } else if (command == 0x04) {
+            } else if (addressType == 0x04) {
                 // IPv6
                 byte[] addressBytes = new byte[16];
                 inputBuffer.get(addressBytes);
                 requestedAddress = InetAddress.getByAddress(addressBytes);
-            } else if (command == 0x03) {
+            } else if (addressType == 0x03) {
                 // domain name
                 int domainNameLength = Byte.toUnsignedInt(inputBuffer.get());
                 byte[] domainNameBytes = new byte[domainNameLength];
@@ -97,11 +95,11 @@ public class ProxyServer {
                 String domainName = new String(domainNameBytes, StandardCharsets.UTF_8);
                 requestedAddress = InetAddress.getByName(domainName);
             } else {
-                // invalid command
+                // invalid addressType
                 outputBuffer.clear();
                 outputBuffer
                     .put(SOCKS_VERSION)
-                    .put((byte) 0x07); // command not supported
+                    .put((byte) 0x07); // addressType not supported
                 outputBuffer.flip();
                 socketChannel.write(outputBuffer);
                 return;
@@ -132,7 +130,7 @@ public class ProxyServer {
             socketChannel.write(outputBuffer);
 
             // connect to requested address
-            System.out.println("connecting to " + requestedAddress + ":" + requestedPort);
+            System.out.println("connecting to " + requestedAddress.getHostName() + ":" + requestedPort);
 
 
 		} catch (IOException e) {
