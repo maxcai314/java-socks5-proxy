@@ -7,12 +7,12 @@ import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+
+import static java.lang.System.Logger.Level.INFO;
 
 public class ProxyServer implements Closeable{
+	private static final System.Logger logger = System.getLogger(ProxyServer.class.getName());
+
 	public static final byte SOCKS_VERSION = 0x05;
 	public static final byte RESERVED_BYTE = 0x00;
 
@@ -182,51 +182,39 @@ public class ProxyServer implements Closeable{
 		return new InetSocketAddress(requestedAddress, requestedPort);
 	}
 
-	private static void forwardPackets(SocketChannel socketChannelIn, SocketChannel socketChannelOut) {
-		try {
-			ByteBuffer inputBuffer = ByteBuffer.allocateDirect(4096); // 1 page
+	private static void forwardPackets(SocketChannel socketChannelIn, SocketChannel socketChannelOut) throws IOException {
+		ByteBuffer inputBuffer = ByteBuffer.allocateDirect(4096); // 1 page
 
-			while (!Thread.interrupted()) {
-				inputBuffer.clear();
-				int bytesRecieved = socketChannelIn.read(inputBuffer); // gets request from In
-				inputBuffer.flip();
-				System.out.println("forwarding packets");
-				System.out.println("bytes: " + bytesRecieved);
+		while (!Thread.interrupted()) {
+			inputBuffer.clear();
+			int bytesRecieved = socketChannelIn.read(inputBuffer); // gets request from In
+			inputBuffer.flip();
+			System.out.println("forwarding packets");
+			System.out.println("bytes: " + bytesRecieved);
 
-				if (bytesRecieved == -1) {
-					break;
-				}
-
-				socketChannelOut.write(inputBuffer); // sends request to Out
+			if (bytesRecieved == -1) {
+				throw new IOException("End of Stream");
 			}
-		} catch (IOException e) {
-			throw new RuntimeException(e);
+
+			socketChannelOut.write(inputBuffer); // sends request to Out
 		}
 	}
 
-	public void acceptSocketConnection() throws IOException {
+	public void acceptSocketConnection() throws IOException, InterruptedException {
 		try (
 			SocketChannel socketChannelClient = serverSocketChannel.accept();
+			SocketChannel socketChannelServer = SocketChannel.open(socks5Negotiation(socketChannelClient));
+			PersistentTaskExecutor<IOException> executor = new PersistentTaskExecutor<>("forwardPackets", a -> (IOException) a, logger);
 		) {
-			InetSocketAddress requestedAddress = socks5Negotiation(socketChannelClient);
-			System.out.println("requestedAddress: " + requestedAddress);
-			System.out.println("connecting to server");
+			logger.log(INFO , "opening server connection with {0}", socketChannelServer.getRemoteAddress());
 
-			try (
-				SocketChannel socketChannelServer = SocketChannel.open(requestedAddress);
-			) {
-				System.out.println("connected to server");
-				ExecutorService executorService = Executors.newFixedThreadPool(2);
-				executorService.submit(() -> forwardPackets(socketChannelServer, socketChannelClient));
-				executorService.submit(() -> forwardPackets(socketChannelClient, socketChannelServer));
+			executor.submit("Forward Requests", () -> forwardPackets(socketChannelClient, socketChannelServer));
+			executor.submit("Forward Responses", () -> forwardPackets(socketChannelServer, socketChannelClient));
 
-				executorService.awaitTermination(10, TimeUnit.MINUTES);
+			executor.join();
+			executor.throwIfFailed();
 
-				System.out.println("closing server connection");
-			} catch (InterruptedException e) {
-				throw new RuntimeException(e);
-			}
-
+			logger.log(INFO, "closing server connection with {0}", socketChannelServer.getRemoteAddress());
 		}
 	}
 }

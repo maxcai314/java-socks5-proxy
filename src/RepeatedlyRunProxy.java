@@ -1,19 +1,17 @@
 import java.io.IOException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public class RepeatedlyRunProxy {
+    private static final System.Logger logger = System.getLogger(RepeatedlyRunProxy.class.getName());
+
     public static void main(String[] args) throws IOException {
-        ProxyServer proxyServer = new ProxyServer();
-        ExecutorService executorService = Executors.newCachedThreadPool();
-        for (int i = 0; i < 10; i++) {
-            executorService.submit(() -> {
-                try {
-                    proxyServer.acceptSocketConnection();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            });
+        try (
+            ProxyServer proxyServer = new ProxyServer();
+            IndependentTaskExecutor<Exception> executor = new IndependentTaskExecutor<>("Proxy Server", logger);
+        ) {
+            for (int i = 0; i < 100; i++) {
+                // todo: add a count of open connections, and use while loop to always fill
+                executor.submit("SOCKS5 Session", proxyServer::acceptSocketConnection);
+            }
         }
     }
 }
