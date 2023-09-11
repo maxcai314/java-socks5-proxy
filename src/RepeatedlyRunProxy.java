@@ -6,7 +6,7 @@ public class RepeatedlyRunProxy {
 
     public static void main(String[] args) throws IOException, InterruptedException {
         try (
-            ProxyServer proxyServer = new ProxyServer();
+            ProxyServer proxyServer = new ProxyServer(314);
             IndependentTaskExecutor<Exception> executor = new IndependentTaskExecutor<>("Proxy Server", logger);
         ) {
             while (!Thread.interrupted()) {
