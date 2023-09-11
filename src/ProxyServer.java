@@ -1,166 +1,130 @@
 import java.io.*;
 import java.net.*;
+import java.nio.ByteBuffer;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
+import java.nio.charset.StandardCharsets;
 
 public class ProxyServer {
+	public static final byte SOCKS_VERSION = 0x05;
+    public static final byte RESERVED_BYTE = 0x00;
 
-    // later on, use enum for auth methods
-    public static boolean authMethodPresent(byte[] buffer, byte authMethod) {
-        assert(buffer[0] == 0x05); // version
-        System.out.println("client greeting: ");
-        int i = buffer[1]; // number of methods
-        System.out.printf("number of methods: %d\n", i);
-        for (int j = 0; j < i; j++) {
-            System.out.printf("%02x ", buffer[j + 2]);
-            if (buffer[j + 2] == authMethod) {
-                return true;
-            }
-        }
-        return false;
-    }
+	public static boolean authMethodPresent(byte[] authMethods, byte authMethod) {
+		for (byte b : authMethods) {
+			if (b == authMethod) {
+				return true;
+			}
+		}
+		return false;
+	}
 
-    public static boolean authUserPassword(byte[] buffer) {
-        assert(buffer[0] == 0x01); // password version
-        int usernameLength = buffer[1];
-        String username = new String(buffer, 2, usernameLength);
-        int passwordLength = buffer[2 + usernameLength];
-        String password = new String(buffer, 3 + usernameLength, passwordLength);
-        return username.equals("user") && password.equals("password");
-    }
 
-    // get the address requested by the client
-    public static String getAddress(byte[] buffer) {
-        byte addressType = buffer[3];
-        if (addressType == 0x01) {
-            // IPv4
-            return String.format("%d.%d.%d.%d", buffer[4], buffer[5], buffer[6], buffer[7]);
-        } else if (addressType == 0x03) {
-            // domain name
-            int domainLength = buffer[4];
-            return new String(buffer, 5, domainLength);
-        } else if (addressType == 0x04) {
-            // IPv6
-            // convert 16 bytes to 8 2-byte hex strings
-            String[] hexStrings = new String[8];
-            for (int i = 0; i < 8; i++) {
-                hexStrings[i] = String.format("%02x%02x", buffer[2 * i + 4], buffer[2 * i + 5]);
-            }
-            return String.join(":", hexStrings);
-        }
-        return null;
-    }
 
-    public static int getPort(byte[] buffer) {
-        // big endian
-        byte addressType = buffer[3];
-        if (addressType == 0x01) {
-            // IPv4
-            return (buffer[8] << 8) | -buffer[9];
-        } else if (addressType == 0x03) {
-            // domain name
-            int domainLength = buffer[4];
-            System.out.println(buffer[5 + domainLength] + " " + buffer[6 + domainLength]);
-            return (buffer[5 + domainLength] << 8) + (buffer[6 + domainLength]);
-        } else if (addressType == 0x04) {
-            // IPv6
-            return (buffer[20] << 8) | -buffer[21];
-        }
-        return -1;
-    }
+	public static void main(String[] args) {
+		try (
+            ServerSocketChannel serverSocketChannel = ServerSocketChannel.open().bind(new InetSocketAddress(6789));
+            SocketChannel socketChannel = serverSocketChannel.accept();
+        ) {
+			ByteBuffer inputBuffer = ByteBuffer.allocateDirect(1024);
+			ByteBuffer outputBuffer = ByteBuffer.allocateDirect(1024);
 
-    public static void main(String[] args) {
-        try (ServerSocket serverSocket = new ServerSocket(6789)) {
-            Socket socket = serverSocket.accept();
 
-            System.out.println("client connected");
+			// client greeting
+			socketChannel.read(inputBuffer);
+			byte socksVersion = inputBuffer.get();
+			byte numAuthMethods = inputBuffer.get();
+			byte[] authMethods = new byte[numAuthMethods];
+			inputBuffer.get(authMethods);
 
-            byte[] buffer = new byte[2048];
+			assert(socksVersion == SOCKS_VERSION);
 
-            int bytesRead;
+			byte acceptedAuthMethod = 0x00; // no auth
+			if (authMethodPresent(authMethods, acceptedAuthMethod)) {
+				// we can proceed
+				outputBuffer
+					.put(SOCKS_VERSION)
+					.put(acceptedAuthMethod);
+                outputBuffer.flip();
+				socketChannel.write(outputBuffer);
+                outputBuffer.clear();
+			} else {
+				// we can't proceed
+				// send auth failed and close server
+                outputBuffer
+                    .put(SOCKS_VERSION)
+                    .put((byte) 0xFF);
+                outputBuffer.flip();
+                socketChannel.write(outputBuffer);
+                outputBuffer.clear();
+                return;
+			}
 
-            // handshake
+            // client connection request
+            socketChannel.read(inputBuffer);
+            socksVersion = inputBuffer.get();
+            byte command = inputBuffer.get();
+            byte reserved = inputBuffer.get();
+            byte addressType = inputBuffer.get();
 
-            // greeting
-            bytesRead = socket.getInputStream().read(buffer);
+            assert(socksVersion == SOCKS_VERSION);
+            assert(reserved == RESERVED_BYTE);
 
-            byte chosenAuthMethod = 0x00; // username / password
-
-            if (authMethodPresent(buffer, chosenAuthMethod)) {
-                // send response
-                byte[] response = {0x05, chosenAuthMethod};
-                socket.getOutputStream().write(response);
+            InetAddress requestedAddress;
+            if (command == 0x01) { // todo: maybe make these enums or static variables
+                // IPv4
+                byte[] addressBytes = new byte[4];
+                inputBuffer.get(addressBytes);
+                requestedAddress = InetAddress.getByAddress(addressBytes);
+            } else if (command == 0x04) {
+                // IPv6
+                byte[] addressBytes = new byte[16];
+                inputBuffer.get(addressBytes);
+                requestedAddress = InetAddress.getByAddress(addressBytes);
+            } else if (command == 0x03) {
+                // domain name
+                int domainNameLength = Byte.toUnsignedInt(inputBuffer.get());
+                byte[] domainNameBytes = new byte[domainNameLength];
+                inputBuffer.get(domainNameBytes);
+                String domainName = new String(domainNameBytes, StandardCharsets.UTF_8);
+                requestedAddress = InetAddress.getByName(domainName);
             } else {
-                // send response
-                byte[] response = {0x05, (byte) 0xFF};
-                socket.getOutputStream().write(response);
-                socket.close();
+                // invalid command
+                outputBuffer
+                    .put(SOCKS_VERSION)
+                    .put((byte) 0x07); // command not supported
                 return;
             }
 
-//            System.out.println("choosing username / password auth");
-            System.out.println("choosing no auth");
+            int requestedPort = Short.toUnsignedInt(inputBuffer.getShort());
 
-            // client authentication request
-//            bytesRead = socket.getInputStream().read(buffer);
-
-//            if (authUserPassword(buffer)) {
-//                // send response
-//                byte[] response = {0x01, 0x00};
-//                socket.getOutputStream().write(response);
-//            } else {
-//                // send response
-//                byte[] response = {0x01, 0x01};
-//                socket.getOutputStream().write(response);
-//                socket.close();
-//                return;
-//            }
-
-            // send response
-//            socket.getOutputStream().write(new byte[] {0x01, 0x00});
-
-            System.out.println("auth successful");
-
-            // client connection request
-            bytesRead = socket.getInputStream().read(buffer);
-            assert(buffer[0] == 0x05); // version
-            assert(buffer[2] == 0x00); // reserved
-            String address = getAddress(buffer);
-            assert(address != null);
-            // port number in network byte order
-            int port = getPort(buffer);
-            assert(port != -1);
-            byte commandCode = buffer[1]; // todo: use this. 0x01 = tcp stream connection, 0x02 = TCP port binding, 0x03 = associate udp port
-            System.out.println("command code: " + commandCode);
-
-            // send response
-            byte[] response = new byte[bytesRead];
-            System.arraycopy(buffer, 0, response, 0, bytesRead);
-            response[1] = 0x00; // success
-            socket.getOutputStream().write(response);
-
-            System.out.println("client requested " + address + ":" + port);
-
-            // do the proxying
-
-            while ((bytesRead = socket.getInputStream().read(buffer)) != -1) {
-                System.out.println("read " + bytesRead + " bytes");
-                System.out.println(new String(buffer, 0, bytesRead));
-                Socket targetSocket = new Socket(address, port);
-                System.out.println("connected to target");
-                targetSocket.getOutputStream().write(buffer);
-                System.out.println("wrote " + bytesRead + " bytes");
-//                targetSocket.getOutputStream().flush();
-                int targetBytesRead;
-                while ((targetBytesRead = targetSocket.getInputStream().read(buffer)) != -1) {
-                    System.out.println("read " + targetBytesRead + " bytes");
-                    System.out.println(new String(buffer, 0, targetBytesRead));
-                    socket.getOutputStream().write(buffer, 0, targetBytesRead);
-                    socket.getOutputStream().flush();
-                }
-                targetSocket.close();
-                System.out.println("closed target socket");
+            // reply
+            outputBuffer
+                .put(SOCKS_VERSION)
+                .put((byte) 0x00) // request granted
+                .put((byte) RESERVED_BYTE); // reserved
+            // this could be its own method
+            outputBuffer.put(addressType); // IPv4
+            if (addressType == 0x01 || addressType == 0x04) {
+                // IPv4 or IPv6
+                outputBuffer.put(requestedAddress.getAddress());
+            } else if (addressType == 0x03) {
+                // domain name
+                byte[] domainNameBytes = requestedAddress.getHostName().getBytes(StandardCharsets.UTF_8);
+                outputBuffer
+                    .put((byte) domainNameBytes.length) // IPv4
+                    .put(domainNameBytes);
             }
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
+            outputBuffer.putShort((short) requestedPort);
+            outputBuffer.flip();
+            socketChannel.write(outputBuffer);
+            outputBuffer.clear();
+
+            // connect to requested address
+
+
+
+		} catch (IOException e) {
+			throw new RuntimeException(e);
+		}
+	}
 }
