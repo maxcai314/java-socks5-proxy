@@ -4,6 +4,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 public class ProxyServer {
 	public static final byte SOCKS_VERSION = 0x05;
@@ -30,37 +31,45 @@ public class ProxyServer {
 
 
 			// client greeting
-			socketChannel.read(inputBuffer);
+            System.out.println("client greeting");
+			inputBuffer.clear();
+            socketChannel.read(inputBuffer);
+            inputBuffer.flip();
 			byte socksVersion = inputBuffer.get();
 			byte numAuthMethods = inputBuffer.get();
 			byte[] authMethods = new byte[numAuthMethods];
 			inputBuffer.get(authMethods);
+            System.out.println("num auth methods: " + numAuthMethods);
+            System.out.println("auth methods: " + Arrays.toString(authMethods));
+            System.out.println("socks version: " + socksVersion);
 
 			assert(socksVersion == SOCKS_VERSION);
 
 			byte acceptedAuthMethod = 0x00; // no auth
 			if (authMethodPresent(authMethods, acceptedAuthMethod)) {
 				// we can proceed
-				outputBuffer
+                outputBuffer.clear();
+                outputBuffer
 					.put(SOCKS_VERSION)
 					.put(acceptedAuthMethod);
                 outputBuffer.flip();
 				socketChannel.write(outputBuffer);
-                outputBuffer.clear();
 			} else {
 				// we can't proceed
 				// send auth failed and close server
+                outputBuffer.clear();
                 outputBuffer
                     .put(SOCKS_VERSION)
                     .put((byte) 0xFF);
                 outputBuffer.flip();
                 socketChannel.write(outputBuffer);
-                outputBuffer.clear();
                 return;
 			}
 
             // client connection request
+            inputBuffer.clear();
             socketChannel.read(inputBuffer);
+            inputBuffer.flip();
             socksVersion = inputBuffer.get();
             byte command = inputBuffer.get();
             byte reserved = inputBuffer.get();
@@ -89,15 +98,19 @@ public class ProxyServer {
                 requestedAddress = InetAddress.getByName(domainName);
             } else {
                 // invalid command
+                outputBuffer.clear();
                 outputBuffer
                     .put(SOCKS_VERSION)
                     .put((byte) 0x07); // command not supported
+                outputBuffer.flip();
+                socketChannel.write(outputBuffer);
                 return;
             }
 
             int requestedPort = Short.toUnsignedInt(inputBuffer.getShort());
 
             // reply
+            outputBuffer.clear();
             outputBuffer
                 .put(SOCKS_VERSION)
                 .put((byte) 0x00) // request granted
@@ -117,10 +130,9 @@ public class ProxyServer {
             outputBuffer.putShort((short) requestedPort);
             outputBuffer.flip();
             socketChannel.write(outputBuffer);
-            outputBuffer.clear();
 
             // connect to requested address
-
+            System.out.println("connecting to " + requestedAddress + ":" + requestedPort);
 
 
 		} catch (IOException e) {
