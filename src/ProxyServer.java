@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class ProxyServer implements Closeable{
 	public static final byte SOCKS_VERSION = 0x05;
@@ -187,11 +188,14 @@ public class ProxyServer implements Closeable{
 
 			while (!Thread.interrupted()) {
 				inputBuffer.clear();
-				socketChannelIn.read(inputBuffer); // gets request from In
+				int bytesRecieved = socketChannelIn.read(inputBuffer); // gets request from In
 				inputBuffer.flip();
 				System.out.println("forwarding packets");
-				System.out.println("inputBuffer: " + inputBuffer);
-				System.out.println(Arrays.toString(inputBuffer.array()));
+				System.out.println("bytes: " + bytesRecieved);
+
+				if (bytesRecieved == -1) {
+					break;
+				}
 
 				socketChannelOut.write(inputBuffer); // sends request to Out
 			}
@@ -216,6 +220,11 @@ public class ProxyServer implements Closeable{
 				executorService.submit(() -> forwardPackets(socketChannelServer, socketChannelClient));
 				executorService.submit(() -> forwardPackets(socketChannelClient, socketChannelServer));
 
+				executorService.awaitTermination(10, TimeUnit.MINUTES);
+
+				System.out.println("closing server connection");
+			} catch (InterruptedException e) {
+				throw new RuntimeException(e);
 			}
 
 		}
