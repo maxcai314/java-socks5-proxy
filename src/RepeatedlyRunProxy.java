@@ -11,7 +11,7 @@ public class RepeatedlyRunProxy {
         ) {
             while (!Thread.interrupted()) {
                 SocketChannel socketChannelClient = proxyServer.accept();
-                executor.submit("SOCKS5 Proxy Session", () -> proxyServer.handleConnection(socketChannelClient));
+                executor.submit("SOCKS5 Proxy Session", () -> proxyServer.handleSocketConnection(socketChannelClient));
             }
         }
     }
