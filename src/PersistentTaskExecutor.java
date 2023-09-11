@@ -3,7 +3,6 @@ import static java.lang.System.Logger.Level.*;
 
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
-import java.util.concurrent.Executor;
 import java.util.concurrent.StructuredTaskScope;
 import java.util.function.Function;
 
