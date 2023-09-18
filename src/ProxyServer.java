@@ -47,7 +47,7 @@ public class ProxyServer implements Closeable{
 		}
 	}
 
-	private static InetSocketAddress socks5Negotiation(SocketChannel socketChannel) throws IOException {
+	private static RequestedConnection socks5Negotiation(SocketChannel socketChannel) throws IOException {
 		ByteBuffer inputBuffer = ByteBuffer.allocateDirect(1024);
 		ByteBuffer outputBuffer = ByteBuffer.allocateDirect(1024);
 
@@ -179,10 +179,12 @@ public class ProxyServer implements Closeable{
 		outputBuffer.flip();
 		socketChannel.write(outputBuffer);
 
-		return new InetSocketAddress(requestedAddress, requestedPort);
+		InetSocketAddress address = new InetSocketAddress(requestedAddress, requestedPort);
+		logger.log(INFO , "opening server connection with {0}", address);
+		return new RequestedConnection(command, address);
 	}
 
-	private static void forwardPackets(SocketChannel socketChannelIn, SocketChannel socketChannelOut) throws IOException {
+	private static void forwardPackets(GenericNetworkChannel socketChannelIn, GenericNetworkChannel socketChannelOut) throws IOException {
 		ByteBuffer inputBuffer = ByteBuffer.allocateDirect(4096); // 1 page
 
 		while (!Thread.interrupted()) {
@@ -206,18 +208,16 @@ public class ProxyServer implements Closeable{
 
 	public void handleSocketConnection(SocketChannel socketChannelClient) throws IOException, InterruptedException {
 		try (
-			SocketChannel socketChannelServer = SocketChannel.open(socks5Negotiation(socketChannelClient));
-			PersistentTaskExecutor<IOException> executor = new PersistentTaskExecutor<>("forwardPackets", a -> new IOException(a), logger);
+			GenericNetworkChannel socketChannelServer = socks5Negotiation(socketChannelClient).connect();
+			PersistentTaskExecutor<IOException> executor = new PersistentTaskExecutor<>("forwardPackets", IOException::new, logger);
 		) {
-			logger.log(INFO , "opening server connection with {0}", socketChannelServer.getRemoteAddress());
-
-			executor.submit("Forward Requests", () -> forwardPackets(socketChannelClient, socketChannelServer));
-			executor.submit("Forward Responses", () -> forwardPackets(socketChannelServer, socketChannelClient));
+			executor.submit("Forward Requests", () -> forwardPackets(new GenericNetworkChannel(socketChannelClient), socketChannelServer));
+			executor.submit("Forward Responses", () -> forwardPackets(socketChannelServer, new GenericNetworkChannel(socketChannelClient)));
 
 			executor.join();
 			executor.throwIfFailed();
 
-			logger.log(INFO, "closing server connection with {0}", socketChannelServer.getRemoteAddress());
+			logger.log(INFO, "closing server connection");
 		} finally {
 			socketChannelClient.close();
 		}
