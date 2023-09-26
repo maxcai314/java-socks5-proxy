@@ -4,8 +4,10 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
+import java.nio.channels.WritableByteChannel;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.nio.channels.DatagramChannel;
 import java.nio.charset.StandardCharsets;
 
 import static java.lang.System.Logger.Level.INFO;
@@ -30,6 +32,11 @@ public class ProxyServer implements Closeable{
 	public void close() throws IOException {
 		serverSocketChannel.close();
 	}
+
+	protected record RequestedConnection (
+	    byte command,
+	    InetSocketAddress address
+	) {}
 
 	private static boolean authMethodPresent(byte[] authMethods, byte authMethod) {
 		for (byte b : authMethods) {
@@ -184,7 +191,7 @@ public class ProxyServer implements Closeable{
 		return new RequestedConnection(command, address);
 	}
 
-	private static void forwardPackets(GenericNetworkChannel socketChannelIn, GenericNetworkChannel socketChannelOut) throws IOException {
+	private static void forwardPackets(ReadableByteChannel socketChannelIn, WritableByteChannel socketChannelOut) throws IOException {
 		ByteBuffer inputBuffer = ByteBuffer.allocateDirect(4096); // 1 page
 
 		while (!Thread.interrupted()) {
@@ -208,17 +215,34 @@ public class ProxyServer implements Closeable{
 
 	public void handleSocketConnection(SocketChannel socketChannelClient) throws IOException, InterruptedException {
 		try (
-			GenericNetworkChannel socketChannelServer = socks5Negotiation(socketChannelClient).connect();
 			PersistentTaskExecutor<IOException> executor = new PersistentTaskExecutor<>("forwardPackets", IOException::new, logger);
 		) {
-			executor.submit("Forward Requests", () -> forwardPackets(new GenericNetworkChannel(socketChannelClient), socketChannelServer));
-			executor.submit("Forward Responses", () -> forwardPackets(socketChannelServer, new GenericNetworkChannel(socketChannelClient)));
+			RequestedConnection requestedServer = socks5Negotiation(socketChannelClient);
 
-			executor.join();
-			executor.throwIfFailed();
+			if (requestedServer.command == 0x01) {
+				// establish a TCP stream
+				try (SocketChannel socketChannelServer = SocketChannel.open()) {
+					socketChannelServer.connect(requestedServer.address);
+					executor.submit("Forward Requests", () -> forwardPackets(socketChannelClient, socketChannelServer));
+					executor.submit("Forward Responses", () -> forwardPackets(socketChannelServer, socketChannelClient));
 
-			logger.log(INFO, "closing server connection");
+					executor.join();
+					executor.throwIfFailed();
+				}
+			} else if (requestedServer.command == 0x03) {
+				try (DatagramChannel dataChannelServer = DatagramChannel.open()) {
+					dataChannelServer.connect(requestedServer.address);
+					executor.submit("Forward Requests", () -> forwardPackets(socketChannelClient, dataChannelServer));
+					executor.submit("Forward Responses", () -> forwardPackets(dataChannelServer, socketChannelClient));
+
+					executor.join();
+					executor.throwIfFailed();
+				}
+			} else {
+				throw new IOException("Unsuppourted command: " + requestedServer.command);
+			}
 		} finally {
+			logger.log(INFO, "closing server connection");
 			socketChannelClient.close();
 		}
 	}
