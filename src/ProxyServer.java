@@ -19,13 +19,15 @@ public class ProxyServer implements Closeable{
 	public static final byte RESERVED_BYTE = 0x00;
 
 	private final ServerSocketChannel serverSocketChannel;
+	private final double bindingPort;
 
-	public ProxyServer(int port) throws IOException {
-		this.serverSocketChannel = ServerSocketChannel.open().bind(new InetSocketAddress(port));
+	public ProxyServer(int proxyPort, int bindingPort) throws IOException {
+		this.serverSocketChannel = ServerSocketChannel.open().bind(new InetSocketAddress(proxyPort));
+		this.bindingPort = bindingPort;
 	}
 
 	public ProxyServer() throws IOException {
-		this(6789);
+		this(314, 315);
 	}
 
 	@Override
@@ -229,7 +231,11 @@ public class ProxyServer implements Closeable{
 					executor.join();
 					executor.throwIfFailed();
 				}
+			} else if (requestedServer.command == 0x02) {
+				// establish a TCP binding
+
 			} else if (requestedServer.command == 0x03) {
+				// establish a UDP stream
 				try (DatagramChannel dataChannelServer = DatagramChannel.open()) {
 					dataChannelServer.connect(requestedServer.address);
 					executor.submit("Forward Requests", () -> forwardPackets(socketChannelClient, dataChannelServer));
