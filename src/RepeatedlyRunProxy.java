@@ -1,4 +1,5 @@
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.nio.channels.SocketChannel;
 
 public class RepeatedlyRunProxy {
@@ -6,7 +7,7 @@ public class RepeatedlyRunProxy {
 
     public static void main(String[] args) throws IOException, InterruptedException {
         try (
-            ProxyServer proxyServer = new ProxyServer(314);
+            ProxyServer proxyServer = new ProxyServer(314, 315); // your IP
             IndependentTaskExecutor<Exception> executor = new IndependentTaskExecutor<>("Proxy Server", logger);
         ) {
             while (!Thread.interrupted()) {

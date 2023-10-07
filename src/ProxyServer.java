@@ -19,11 +19,11 @@ public class ProxyServer implements Closeable{
 	public static final byte RESERVED_BYTE = 0x00;
 
 	private final ServerSocketChannel serverSocketChannel;
-	private final double bindingPort;
+	private final Socks5Address bindAddress;
 
-	public ProxyServer(int proxyPort, int bindingPort) throws IOException {
+	public ProxyServer(int proxyPort, int bindPort) throws IOException {
 		this.serverSocketChannel = ServerSocketChannel.open().bind(new InetSocketAddress(proxyPort));
-		this.bindingPort = bindingPort;
+		this.bindAddress = Socks5Address.fromInetSocketAddress(new InetSocketAddress(InetAddress.getLocalHost(), bindPort));
 	}
 
 	public ProxyServer() throws IOException {
@@ -35,10 +35,19 @@ public class ProxyServer implements Closeable{
 		serverSocketChannel.close();
 	}
 
-	protected record RequestedConnection (
+	protected record Socks5Address(
 	    byte command,
 	    InetSocketAddress address
-	) {}
+	) {
+		public static Socks5Address fromInetSocketAddress(InetSocketAddress address) {
+			// figure out if its ipv4 or ipv6
+			if (address.getAddress().getAddress().length == 4) {
+				return new Socks5Address((byte) 0x01, address);
+			} else {
+				return new Socks5Address((byte) 0x04, address);
+			}
+		}
+	}
 
 	private static boolean authMethodPresent(byte[] authMethods, byte authMethod) {
 		for (byte b : authMethods) {
@@ -56,7 +65,7 @@ public class ProxyServer implements Closeable{
 		}
 	}
 
-	private static RequestedConnection socks5Negotiation(SocketChannel socketChannel) throws IOException {
+	private Socks5Address socks5Negotiation(SocketChannel socketChannel) throws IOException {
 		ByteBuffer inputBuffer = ByteBuffer.allocateDirect(1024);
 		ByteBuffer outputBuffer = ByteBuffer.allocateDirect(1024);
 
@@ -173,24 +182,16 @@ public class ProxyServer implements Closeable{
 				.put((byte) 0x00) // request granted
 				.put((byte) RESERVED_BYTE); // reserved
 		// this could be its own method
-		outputBuffer.put(addressType); // IPv4
-		if (addressType == 0x01 || addressType == 0x04) {
-			// IPv4 or IPv6
-			outputBuffer.put(requestedAddress.getAddress());
-		} else {
-			// domain name
-			byte[] domainNameBytes = requestedAddress.getHostName().getBytes(StandardCharsets.UTF_8);
-			outputBuffer
-					.put((byte) domainNameBytes.length) // IPv4
-					.put(domainNameBytes);
-		}
-		outputBuffer.putShort((short) requestedPort);
+		outputBuffer.put(addressType); // IPv4 or IPv6
+		outputBuffer.put(bindAddress.address().getAddress().getAddress());
+		outputBuffer.putShort((short) bindAddress.address().getPort());
+
 		outputBuffer.flip();
 		socketChannel.write(outputBuffer);
 
 		InetSocketAddress address = new InetSocketAddress(requestedAddress, requestedPort);
 		logger.log(INFO , "opening server connection with {0}", address);
-		return new RequestedConnection(command, address);
+		return new Socks5Address(command, address);
 	}
 
 	private static void forwardPackets(ReadableByteChannel socketChannelIn, WritableByteChannel socketChannelOut) throws IOException {
@@ -219,7 +220,7 @@ public class ProxyServer implements Closeable{
 		try (
 			PersistentTaskExecutor<IOException> executor = new PersistentTaskExecutor<>("forwardPackets", IOException::new, logger);
 		) {
-			RequestedConnection requestedServer = socks5Negotiation(socketChannelClient);
+			Socks5Address requestedServer = socks5Negotiation(socketChannelClient);
 
 			if (requestedServer.command == 0x01) {
 				// establish a TCP stream
@@ -233,7 +234,15 @@ public class ProxyServer implements Closeable{
 				}
 			} else if (requestedServer.command == 0x02) {
 				// establish a TCP binding
+				try (ServerSocketChannel socketChannelLocal = ServerSocketChannel.open()) {
+					socketChannelLocal.bind(null, bindAddress.address.getPort());
+					SocketChannel socketChannelBind = socketChannelLocal.accept();
+					executor.submit("Forward Requests", () -> forwardPackets(socketChannelClient, socketChannelBind));
+					executor.submit("Forward Responses", () -> forwardPackets(socketChannelBind, socketChannelClient));
 
+					executor.join();
+					executor.throwIfFailed();
+				}
 			} else if (requestedServer.command == 0x03) {
 				// establish a UDP stream
 				try (DatagramChannel dataChannelServer = DatagramChannel.open()) {
