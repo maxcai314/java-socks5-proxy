@@ -1,7 +1,6 @@
 import java.io.Closeable;
 import java.io.IOException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
+import java.net.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.WritableByteChannel;
@@ -19,15 +18,13 @@ public class ProxyServer implements Closeable{
 	public static final byte RESERVED_BYTE = 0x00;
 
 	private final ServerSocketChannel serverSocketChannel;
-	private final Socks5Address bindAddress;
 
-	public ProxyServer(int proxyPort, int bindPort) throws IOException {
+	public ProxyServer(int proxyPort) throws IOException {
 		this.serverSocketChannel = ServerSocketChannel.open().bind(new InetSocketAddress(proxyPort));
-		this.bindAddress = Socks5Address.fromInetSocketAddress(new InetSocketAddress(InetAddress.getLocalHost(), bindPort));
 	}
 
 	public ProxyServer() throws IOException {
-		this(314, 315);
+		this(314);
 	}
 
 	@Override
@@ -37,17 +34,9 @@ public class ProxyServer implements Closeable{
 
 	protected record Socks5Address(
 	    byte command,
-	    InetSocketAddress address
-	) {
-		public static Socks5Address fromInetSocketAddress(InetSocketAddress address) {
-			// figure out if its ipv4 or ipv6
-			if (address.getAddress().getAddress().length == 4) {
-				return new Socks5Address((byte) 0x01, address);
-			} else {
-				return new Socks5Address((byte) 0x04, address);
-			}
-		}
-	}
+	    InetSocketAddress address,
+		SocketChannel bindChannel
+	) {}
 
 	private static boolean authMethodPresent(byte[] authMethods, byte authMethod) {
 		for (byte b : authMethods) {
@@ -181,17 +170,39 @@ public class ProxyServer implements Closeable{
 				.put(SOCKS_VERSION)
 				.put((byte) 0x00) // request granted
 				.put((byte) RESERVED_BYTE); // reserved
-		// this could be its own method
-		outputBuffer.put(addressType); // IPv4 or IPv6
-		outputBuffer.put(bindAddress.address().getAddress().getAddress());
-		outputBuffer.putShort((short) bindAddress.address().getPort());
+
+		// todo: this should definitely be its own method
+		SocketChannel bindChannel = null;
+
+		if (command == 0x02) {
+			// bind command
+			bindChannel = socketChannel.bind(new InetSocketAddress(0));
+			InetSocketAddress bindAddress = (InetSocketAddress) bindChannel.getLocalAddress();
+
+			byte versionTag = switch (bindAddress.getAddress()) {
+				case Inet4Address _ -> 0x01;
+				case Inet6Address _ -> 0x04;
+				default -> throw new AssertionError("OS-assigned bind address is not an InetAddress");
+			};
+
+			outputBuffer
+					.put(versionTag)
+					.put(bindAddress.getAddress().getAddress())
+					.putShort((short) bindAddress.getPort());
+		} else {
+			// send IPv4 address 0.0.0.0:0000
+			outputBuffer
+					.put((byte) 0x01) // IPv4
+					.put(new byte[]{0, 0, 0, 0}) // 0.0.0.0
+					.putShort((short) 0); // port 0
+		}
 
 		outputBuffer.flip();
 		socketChannel.write(outputBuffer);
 
 		InetSocketAddress address = new InetSocketAddress(requestedAddress, requestedPort);
-		logger.log(INFO , "opening server connection with {0}", address);
-		return new Socks5Address(command, address);
+		logger.log(INFO, "opening server connection with {0}", address);
+		return new Socks5Address(command, address, bindChannel);
 	}
 
 	private static void forwardPackets(ReadableByteChannel socketChannelIn, WritableByteChannel socketChannelOut) throws IOException {
@@ -199,12 +210,12 @@ public class ProxyServer implements Closeable{
 
 		while (!Thread.interrupted()) {
 			inputBuffer.clear();
-			int bytesRecieved = socketChannelIn.read(inputBuffer); // gets request from In
+			int bytesReceived = socketChannelIn.read(inputBuffer); // gets request from In
 			inputBuffer.flip();
 			System.out.println("forwarding packets");
-			System.out.println("bytes: " + bytesRecieved);
+			System.out.println("bytes: " + bytesReceived);
 
-			if (bytesRecieved == -1) {
+			if (bytesReceived == -1) {
 				throw new IOException("End of Stream");
 			}
 
@@ -218,35 +229,38 @@ public class ProxyServer implements Closeable{
 
 	public void handleSocketConnection(SocketChannel socketChannelClient) throws IOException, InterruptedException {
 		try (
+			socketChannelClient; // used to auto close socketChannelClient after try block
 			PersistentTaskExecutor<IOException> executor = new PersistentTaskExecutor<>("forwardPackets", IOException::new, logger);
 		) {
-			Socks5Address requestedServer = socks5Negotiation(socketChannelClient);
+			Socks5Address requestedConnection = socks5Negotiation(socketChannelClient);
 
-			if (requestedServer.command == 0x01) {
+			if (requestedConnection.command == 0x01) {
 				// establish a TCP stream
 				try (SocketChannel socketChannelServer = SocketChannel.open()) {
-					socketChannelServer.connect(requestedServer.address);
+					socketChannelServer.connect(requestedConnection.address);
 					executor.submit("Forward Requests", () -> forwardPackets(socketChannelClient, socketChannelServer));
 					executor.submit("Forward Responses", () -> forwardPackets(socketChannelServer, socketChannelClient));
 
 					executor.join();
 					executor.throwIfFailed();
 				}
-			} else if (requestedServer.command == 0x02) {
+			} else if (requestedConnection.command == 0x02) {
 				// establish a TCP binding
-				try (ServerSocketChannel socketChannelLocal = ServerSocketChannel.open()) {
-					socketChannelLocal.bind(null, bindAddress.address.getPort());
-					SocketChannel socketChannelBind = socketChannelLocal.accept();
-					executor.submit("Forward Requests", () -> forwardPackets(socketChannelClient, socketChannelBind));
-					executor.submit("Forward Responses", () -> forwardPackets(socketChannelBind, socketChannelClient));
+				try (
+						ServerSocketChannel serverSocketLocal = ServerSocketChannel.open()
+								.bind(requestedConnection.bindChannel.getLocalAddress());
+						SocketChannel socketChannelLocal = serverSocketLocal.accept();
+					) {
+					executor.submit("Forward Requests", () -> forwardPackets(socketChannelClient, socketChannelLocal));
+					executor.submit("Forward Responses", () -> forwardPackets(socketChannelLocal, socketChannelClient));
 
 					executor.join();
 					executor.throwIfFailed();
 				}
-			} else if (requestedServer.command == 0x03) {
+			} else if (requestedConnection.command == 0x03) {
 				// establish a UDP stream
 				try (DatagramChannel dataChannelServer = DatagramChannel.open()) {
-					dataChannelServer.connect(requestedServer.address);
+					dataChannelServer.connect(requestedConnection.address);
 					executor.submit("Forward Requests", () -> forwardPackets(socketChannelClient, dataChannelServer));
 					executor.submit("Forward Responses", () -> forwardPackets(dataChannelServer, socketChannelClient));
 
@@ -254,11 +268,10 @@ public class ProxyServer implements Closeable{
 					executor.throwIfFailed();
 				}
 			} else {
-				throw new IOException("Unsuppourted command: " + requestedServer.command);
+				throw new IOException("Unsupported command: " + requestedConnection.command);
 			}
 		} finally {
 			logger.log(INFO, "closing server connection");
-			socketChannelClient.close();
 		}
 	}
 }
