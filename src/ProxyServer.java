@@ -105,8 +105,6 @@ public class ProxyServer implements Closeable{
 		byte reserved = inputBuffer.get();
 		byte addressType = inputBuffer.get();
 
-		System.out.printf("socksVersion: %d, command: %d, reserved: %d, addressType: %d\n", socksVersion, command, reserved, addressType);
-
 		assert(socksVersion == SOCKS_VERSION);
 		assert(reserved == RESERVED_BYTE);
 
@@ -216,8 +214,8 @@ public class ProxyServer implements Closeable{
 			inputBuffer.clear();
 			int bytesReceived = socketChannelIn.read(inputBuffer); // gets request from In
 			inputBuffer.flip();
-			System.out.println("forwarding packets");
-			System.out.println("bytes: " + bytesReceived);
+			logger.log(INFO, "forwarding packets");
+			logger.log(INFO, "bytes: {0}", bytesReceived);
 
 			if (bytesReceived == -1) {
 				throw new IOException("End of Stream");
