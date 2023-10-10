@@ -174,7 +174,7 @@ public class ProxyServer implements Closeable{
 		return new Socks5Address(command, address);
 	}
 
-	private SocketChannel sendResponse(SocketChannel socketChannel, Socks5Address requestedAddress) {
+	private SocketChannel sendResponse(SocketChannel socketChannel, Socks5Address requestedAddress) throws IOException {
 		ByteBuffer inputBuffer = ByteBuffer.allocateDirect(1024);
 		ByteBuffer outputBuffer = ByteBuffer.allocateDirect(1024);
 
