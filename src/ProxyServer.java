@@ -175,7 +175,7 @@ public class ProxyServer implements Closeable{
 		return new Socks5Address(command, address);
 	}
 
-	private SocketChannel sendResponse(Socks5Address requestedAddress) {
+	private SocketChannel sendResponse(SocketChannel socketChannel, Socks5Address requestedAddress) {
 		SocketChannel bindChannel = null;
 
 		if (requestedAddress.command == 0x02) {
@@ -237,7 +237,7 @@ public class ProxyServer implements Closeable{
 			PersistentTaskExecutor<IOException> executor = new PersistentTaskExecutor<>("forwardPackets", IOException::new, logger);
 		) {
 			Socks5Address requestedConnection = socks5Negotiation(socketChannelClient);
-			SocketChannel bindChannel = sendResponse(requestedConnection);
+			SocketChannel bindChannel = sendResponse(socketChannelClient, requestedConnection);
 
 			if (requestedConnection.command == 0x01) {
 				// establish a TCP stream
