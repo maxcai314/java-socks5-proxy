@@ -57,7 +57,6 @@ public class ProxyServer implements Closeable{
 		ByteBuffer inputBuffer = ByteBuffer.allocateDirect(1024);
 		ByteBuffer outputBuffer = ByteBuffer.allocateDirect(1024);
 
-
 		// client greeting
 		inputBuffer.clear();
 		waitForBytes(socketChannel, inputBuffer, 2);
@@ -176,6 +175,9 @@ public class ProxyServer implements Closeable{
 	}
 
 	private SocketChannel sendResponse(SocketChannel socketChannel, Socks5Address requestedAddress) {
+		ByteBuffer inputBuffer = ByteBuffer.allocateDirect(1024);
+		ByteBuffer outputBuffer = ByteBuffer.allocateDirect(1024);
+
 		SocketChannel bindChannel = null;
 
 		if (requestedAddress.command == 0x02) {
