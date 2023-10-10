@@ -254,7 +254,7 @@ public class ProxyServer implements Closeable{
 				try (
 						bindChannel; // used to auto close bindChannel
 						ServerSocketChannel serverSocketLocal = ServerSocketChannel.open()
-								.bind(requestedConnection.bindChannel.getLocalAddress());
+								.bind(bindChannel.getLocalAddress());
 						SocketChannel socketChannelLocal = serverSocketLocal.accept();
 					) {
 					executor.submit("Forward Requests", () -> forwardPackets(socketChannelClient, socketChannelLocal));
