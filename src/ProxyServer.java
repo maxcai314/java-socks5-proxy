@@ -251,7 +251,6 @@ public class ProxyServer implements Closeable {
 			} else if (requestedConnection.command == 0x02) {
 				// establish a TCP binding
 				try (
-						bindChannel; // used to auto close bindChannel
 						ServerSocketChannel serverSocketLocal = ServerSocketChannel.open()
 								.bind(bindChannel.getLocalAddress());
 						SocketChannel socketChannelLocal = serverSocketLocal.accept();
@@ -261,6 +260,8 @@ public class ProxyServer implements Closeable {
 
 					executor.join();
 					executor.throwIfFailed();
+				} finally {
+					bindChannel.close();
 				}
 			} else if (requestedConnection.command == 0x03) {
 				// establish a UDP stream
