@@ -9,7 +9,7 @@ import java.nio.channels.SocketChannel;
 import java.nio.channels.DatagramChannel;
 import java.nio.charset.StandardCharsets;
 
-import static java.lang.Logger.Level.INFO;
+import static java.lang.System.Logger.Level.INFO;
 
 public class ProxyServer implements Closeable{
 	private static final System.Logger logger = System.getLogger(ProxyServer.class.getName());
