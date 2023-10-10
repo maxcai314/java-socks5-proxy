@@ -34,8 +34,7 @@ public class ProxyServer implements Closeable{
 
 	protected record Socks5Address(
 	    byte command,
-	    InetSocketAddress address,
-		SocketChannel bindChannel
+	    InetSocketAddress address
 	) {}
 
 	private static boolean authMethodPresent(byte[] authMethods, byte authMethod) {
@@ -171,10 +170,15 @@ public class ProxyServer implements Closeable{
 				.put((byte) 0x00) // request granted
 				.put((byte) RESERVED_BYTE); // reserved
 
-		// todo: this should definitely be its own method
+		InetSocketAddress address = new InetSocketAddress(requestedAddress, requestedPort);
+		logger.log(INFO, "requested server connection with {0}", address);
+		return new Socks5Address(command, address);
+	}
+
+	private SocketChannel sendResponse(Socks5Address requestedAddress) {
 		SocketChannel bindChannel = null;
 
-		if (command == 0x02) {
+		if (requestedAddress.command == 0x02) {
 			// bind command
 			bindChannel = socketChannel.bind(new InetSocketAddress(0));
 			InetSocketAddress bindAddress = (InetSocketAddress) bindChannel.getLocalAddress();
@@ -202,7 +206,7 @@ public class ProxyServer implements Closeable{
 
 		InetSocketAddress address = new InetSocketAddress(requestedAddress, requestedPort);
 		logger.log(INFO, "opening server connection with {0}", address);
-		return new Socks5Address(command, address, bindChannel);
+		return bindChannel;
 	}
 
 	private static void forwardPackets(ReadableByteChannel socketChannelIn, WritableByteChannel socketChannelOut) throws IOException {
@@ -233,6 +237,7 @@ public class ProxyServer implements Closeable{
 			PersistentTaskExecutor<IOException> executor = new PersistentTaskExecutor<>("forwardPackets", IOException::new, logger);
 		) {
 			Socks5Address requestedConnection = socks5Negotiation(socketChannelClient);
+			SocketChannel bindChannel = sendResponse(requestedConnection);
 
 			if (requestedConnection.command == 0x01) {
 				// establish a TCP stream
@@ -271,6 +276,9 @@ public class ProxyServer implements Closeable{
 				throw new IOException("Unsupported command: " + requestedConnection.command);
 			}
 		} finally {
+			if (bindChannel != null) {
+				bindChannel.close();
+			}
 			logger.log(INFO, "closing server connection");
 		}
 	}
