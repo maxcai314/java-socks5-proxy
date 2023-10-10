@@ -206,8 +206,6 @@ public class ProxyServer implements Closeable{
 		outputBuffer.flip();
 		socketChannel.write(outputBuffer);
 
-		InetSocketAddress address = new InetSocketAddress(requestedAddress, requestedPort);
-		logger.log(INFO, "opening server connection with {0}", address);
 		return bindChannel;
 	}
 
