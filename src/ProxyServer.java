@@ -252,6 +252,7 @@ public class ProxyServer implements Closeable{
 			} else if (requestedConnection.command == 0x02) {
 				// establish a TCP binding
 				try (
+						bindChannel; // used to auto close bindChannel
 						ServerSocketChannel serverSocketLocal = ServerSocketChannel.open()
 								.bind(requestedConnection.bindChannel.getLocalAddress());
 						SocketChannel socketChannelLocal = serverSocketLocal.accept();
@@ -276,9 +277,6 @@ public class ProxyServer implements Closeable{
 				throw new IOException("Unsupported command: " + requestedConnection.command);
 			}
 		} finally {
-			if (bindChannel != null) {
-				bindChannel.close();
-			}
 			logger.log(INFO, "closing server connection");
 		}
 	}
