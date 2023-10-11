@@ -205,7 +205,7 @@ public class ProxyServer implements Closeable {
 	}
 
 	private static void forwardPackets(ReadableByteChannel socketChannelIn, WritableByteChannel socketChannelOut) throws IOException {
-		ByteBuffer inputBuffer = ByteBuffer.allocateDirect(4096); // 1 page
+		ByteBuffer inputBuffer = ByteBuffer.allocateDirect(65536); // 16 pages, or 2^16 bytes
 
 		while (!Thread.interrupted()) {
 			inputBuffer.clear();
