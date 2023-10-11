@@ -160,23 +160,20 @@ public class ProxyServer implements Closeable {
 
 		int requestedPort = Short.toUnsignedInt(inputBuffer.getShort());
 
-		// reply
-		outputBuffer.clear();
-		outputBuffer
-				.put(SOCKS_VERSION)
-				.put((byte) 0x00) // request granted
-				.put((byte) RESERVED_BYTE); // reserved
-
 		InetSocketAddress address = new InetSocketAddress(requestedAddress, requestedPort);
 		logger.log(INFO, "requested server connection with {0}", address);
 		return new Socks5Address(command, address);
 	}
 
 	private SocketChannel sendResponse(SocketChannel socketChannel, Socks5Address requestedAddress) throws IOException {
-		ByteBuffer inputBuffer = ByteBuffer.allocateDirect(1024);
 		ByteBuffer outputBuffer = ByteBuffer.allocateDirect(1024);
-
 		SocketChannel bindChannel = null;
+
+		outputBuffer.clear();
+		outputBuffer
+				.put(SOCKS_VERSION)
+				.put((byte) 0x00) // request granted
+				.put((byte) RESERVED_BYTE); // reserved
 
 		if (requestedAddress.command == 0x02) {
 			// bind command
